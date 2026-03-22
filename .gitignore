@@ -1,0 +1,13 @@
+# Ignorer AI-modeller og vekter (for store for GitHub)
+*.pt
+*.pth
+*.onnx
+*.cache
+
+# Ignorer datasett og zips
+*.zip
+NM_NGD_coco_dataset/
+NM_NGD_product_images/
+yolo_data/
+runs/
+__pycache__/

@@ -1,0 +1,1024 @@
+- HUSK: LEVERANDØRFAKTURA / INNGÅENDE BILAG (/ledger/voucher): Kostnadskontoen (f.eks 6300) skal KUN ha "account", "amountGross" (positivt) og "vatType" (f.eks {"id": 1} for 25%). ALDRI sett "supplier" på kostnadskontoen!
+- HUSK: KONTO 2400 PÅ BILAG: Linjen for leverandørgjeld (konto 2400) MÅ ha "amountGross" (negativt), "supplier": {"id": <LEV_ID>}, og "invoiceNumber": "INV-..." (hentet fra oppgaven). INGEN vatType her!
+- HUSK: BELØP OG VALUTA PÅ BILAG I NOK: Bruk ALDRI "amountGrossCurrency", "amountCurrency" eller "currency" i JSON-bodyen for vanlige norske bilag. Bruk UTELUKKENDE "amountGross". Fjerner du valuta-feltene, slipper du 422-feilen om at beløpene må matche!
+- HUSK: MVA-KODER FOR KJØP: 25% inngående = {"id": 1}. 15% = {"id": 11}. 12% = {"id": 13}. 0% = {"id": 5}. Bruk aldri salgs-mva (3) på et bilag.
+- HUSK: OPPRETTE AKTIVITETER (POST /activity): Objektet Activity har IKKE noe felt som heter "project", og IKKE noe felt som heter "activityType". For å opprette en aktivitet for et prosjekt, bruk KUN denne strukturen: {"name": "Aktivitetsnavn", "isProjectActivity": true, "isGeneral": false}.
+- HUSK: FELT-FILTRERING I GET-SØK: ALDRI bruk parameteren 'fields' (eks: 'fields': 'amount,account') når du søker. Det krasjer ID-uthentingen vår. Bruk bare vanlige GET-kall (eks: ?dateFrom=2026-01-01&dateTo=2026-01-31&count=1000).
+- HUSK: IKKE START PÅ NYTT VED FEIL: Hvis du feiler på å opprette en aktivitet eller et prosjekt, SKAL DU IKKE begynne å hente /ledger/posting (hovedboken) på nytt! Du har allerede analysert dataene. Fiks JSON-feilen på /activity-kallet ditt og gå videre.
+- HUSK: INTERNE PROSJEKTER PÅ KONTOER: Når du oppretter de 3 prosjektene basert på kontoene som økte mest, bruk POST /project -> {"name": "Kontonavnet", "isInternal": true, "projectManager": {"id": <ANSATT_ID>}}.
+- HUSK: TOM SANDKASSE. Sjekk alltid om kunden/ansatte/fakturaen finnes med GET. Får du 0 treff, må du bygge dem med POST. Men hvis oppgaven ber deg "finne" en forfalt faktura, HAR dommerne lagt den der!
+- HUSK: UTENLANDSKE ID-NUMMER. Har oppgaven et NIF, SSN, SIREN eller D-nummer? DROP DET i JSON-bodyen! Tripletex krasjer på norsk validering hvis du bruker 'nationalIdentityNumber'.
+- HUSK: PRODUKTER. For POST /product, bruk feltnavnet 'number', ALDRI 'productNumber'. ALDRI send med pris-felter her. Prisen settes på ordrelinjen.
+- HUSK: MVA-KODER (vatType). Salg/Utgående = 3 (25%), 31 (15%), 33 (12%), 5 (0%). Kjøp/Inngående (Bilag) = 1 (25%), 11 (15%), 13 (12%), 5 (0%).
+- HUSK: DATO-FEIL PÅ FAKTURA. Sandkassen ble laget i dag. Ikke bruk fakturadatoer fra 2023 eller 2024, da krasjer Tripletex fordi selskapet ikke hadde bankkonto da. Bruk alltid 2026-datoer når du bygger nye ordrer og fakturaer!
+- HUSK: INNGÅENDE LEVERANDØRFAKTURA (/ledger/voucher). Lag ALDRI en egen postering for MVA. Bruk kun to linjer: Kostnadskonto (positivt beløp, med vatType) og 2400 (negativt beløp, supplier: {id}, INGEN vatType). Legg fakturanummeret i "invoiceNumber" på 2400-linjen!
+- HUSK: VALUTADIFFERANSE (Agio). POST /ledger/voucher med 3 linjer: Bank 1920. Kundefordring 1500 (MED "customer": {"id": X} og "invoice": {"id": Y}). Agio 8060.
+- HUSK: BANKAVSTEMMING (CSV). Penger INN = POST /payment (mot invoice-id). Penger UT = POST /ledger/voucher (Konto 2400 og 1920).
+- HUSK: ANSATT-DETALJER (Employment). Hvis "department.id" mangler, finn/lag avdeling. POST /employee/employment/details krever "workingHoursScheme": "NOT_SHIFT" (streng) og "occupationCode": {"id": <ID>} (objekt).
+- HUSK: LØNN (Manglende fødselsdato). Får du 0 treff på employment? Oppdater ansatt med PUT /employee/<ID> -> {"dateOfBirth": "1990-01-01"} FØRST, lag deretter employment med POST.
+- HUSK: PROSJEKTFAKTURA. Etter POST /timesheet/entry opprettes ordren automatisk! Ikke lag ny ordre. Søk opp ordren (GET /order), og gjør den om til faktura.
+- HUSK: FRIE DIMENSJONER. Opprette verdi: POST /ledger/accountingDimensionValue -> {"description": "Verdien", "accountingDimensionName": {"id": <ID>}}. BRUK 'description', IKKE 'name'! Koble til bilag med "freeAccountingDimension1": {"id": <ID>}.
+- HUSK: KREDITNOTA. Beta-endepunktet (:createCreditNote) er ulovlig. Du må lage en ny ordre, ordrelinje med "count": -1, og ny faktura.
+- HUSK: DATAANALYSE AV HOVEDBOK. Hent transaksjoner med GET /ledger/posting?dateFrom=...&count=1000. Årlig avskrivning: del kjøpesum KUN på antall år (ikke 12).
+- HUSK: INVOICE FIELDS FEILER (400 Illegal field). Tripletex InvoiceDTO støtter IKKE 'totalAmountGross', 'amountRemaining' eller 'amountIncludingVat' i 'fields'-parameteret! For å finne alt om en faktura, bruk bare GET /invoice/<ID> HELT UTEN 'fields'-parameter, så returnerer Tripletex alt!
+- HUSK: 404 PÅ POST /payment (Delbetaling/Betaling). Hvis du får 404 Object Not Found på /payment, betyr det at bankkontoen ikke fungerer. DU MÅ BRUKE MANUELT BILAG I STEDET! Gjør POST /ledger/voucher med to linjer: Debet 1920 (Bank) med beløpet, og Kredit 1500 (Kundefordring, husk "customer": {"id": <K_ID>} og "invoice": {"id": <F_ID>}) med minusbeløpet.
+- HUSK: PURREGEBYR (Mahngebühr / Reminder fee). Deles i to trinn: 1) Bokfør gebyret i regnskapet: POST /ledger/voucher (Debet 1500 med customer: {id}, Kredit 3400). 2) Lag en vanlig faktura på gebyret til kunden og send den (POST /order -> POST /order/orderline -> POST /invoice).
+- HUSK: MANUELL LØNN (VOUCHER FALLBACK): Hvis du må føre lønn via manuelle bilag (POST /ledger/voucher), MÅ hver eneste linje i "postings" ha med "employee": {"id": <ANSATT_ID>} for å koble lønnen til personen! Før grunnlønn og bonus som separate POSITIVE beløp (amountGross) på 5000-kontoer, og summen av disse som et NEGATIVT beløp på konto 2900.
+- HUSK: RIKTIG KOSTNADSKONTO: Du MÅ velge riktig konto basert på hva som er kjøpt i oppgaven eller PDF-en! Programvare/Lisens = 6550. Konsulent/Tjenester = 6700. Kontorrekvisita = 6800. Datautstyr/Inventar = 6540. Strøm/Varme = 6340. Reise/Diett = 7140.
+- HUSK: LEVERANDØRFAKTURA FRA PDF: Du MÅ lese fakturanummeret (Invoice Number) fra PDF-en og legge det inn som "invoiceNumber": "INV-..." i posteringen som går mot leverandørgjelden (konto 2400). Det er livsviktig!
+- HUSK: DATO FRA PDF: Bruk alltid fakturadatoen du leser i PDF-en som "date" på bilaget (POST /ledger/voucher).
+- HUSK: BILAG STRUKTUR (/ledger/voucher): MVA (vatType) skal KUN settes på kostnadskontoen (eks 6550) med positiv "amountGross". Konto 2400 skal ha negativ "amountGross", "supplier": {"id": <ID>}, og "invoiceNumber", men INGEN vatType.
+- HUSK: BANKAVSTEMMING (CSV): Innbetalinger fra kunder = POST /payment (mot faktura-ID). Utbetalinger til leverandører finnes IKKE i fakturaregisteret! De må føres som manuelle bilag med POST /ledger/voucher (Debet 2400, Kredit 1920 Bank).
+- HUSK: KREDITNOTA: Opprett fakturaen først. Lag deretter en ny ordre, legg til ordrelinje med "count": -1, og fakturer den. Beta-endepunkter er forbudt.
+- HUSK: LØNN / ARBEIDSFORHOLD: GET /employee/employment?employeeId=<ID> gir deg arbeidsforholdet. Lønnen (POST /salary/transaction) skal ha "employment": {"id": <ID>}. ALDRI bruk /ledger/voucher for å kjøre lønn.
+- HUSK: FRIE DIMENSJONER: Opprett dimensjonsverdi med "description": "Verdi", og "accountingDimensionName": {"id": <ID>}. Koble til bilag med "freeAccountingDimension1": {"id": <VERDI_ID>} inni posteringen.
+- HUSK: "Feltet eksisterer ikke" (422) betyr at du MÅ fjerne feltet fra JSON-en din umiddelbart. Referanser må alltid være objekter: "customer": {"id": 123}.
+- HUSK: ÅRSAVSLUTNING (Avskrivninger): For årlige avskrivninger, del kjøpesum på antall år. Før det som et bilag per 31.12. (Debet 6020/6010, Kredit 1209).
+- HUSK: NÅR DU ER FERDIG, returner KUN {"status": "DONE"}. Aldri gjenta et vellykket kall.
+- HUSK: ÉN KONTO AV GANGEN! ALDRI søk etter flere kontonumre i en kommaseparert liste (f.eks ?number=1710,6020). Tripletex vil gi deg delvise treff, og du havner i en uendelig loop! Søk ALLTID på KUN én konto per GET-kall (eks: ?number=1710). Får du 0 treff, MÅ du opprette den med POST!
+- HUSK: INGEN 'FIELDS' I SØK! Aldri bruk parameteren 'fields' (f.eks ?fields=id,name) når du søker. Det fører ofte til 400 Illegal field filter. Bruk kun enkle søk!
+- HUSK: MÅNEDSAVSLUTNING (Monatsabschluss). Du MÅ lage kontoer som mangler (ofte 1209 for akkumulert avskrivning og 6020 for kostnad). Årlig avskrivning = (Kjøpesum / År). For MÅNEDLIG avskrivning: (Kjøpesum / År) / 12! Før deretter bilaget for avskrivningen (Debet 6020, Kredit 1209). 
+- HUSK: LØNNSAVSETNING (Gehaltsrückstellung). Føres som et bilag (POST /ledger/voucher). Debet lønnskostnad (5000) med pluss-beløp. Kredit påløpt lønn (2900) med minus-beløp.
+- HUSK: REVERSERE FORSKUDDSBETALT KOSTNAD (Rechnungsabgrenzung). Føres som bilag. Krediter balansekontoen (f.eks. 1710) med minus-beløp, og debiter riktig kostnadskonto (6000-serien) med pluss-beløp.
+- HUSK: TOM SANDKASSE. Uansett hva oppgaven sier ("kunden har betalt", "reverser faktura"), må du sjekke om objektene finnes med GET. Får du 0 treff, MÅ DU BYGGE DEM FRA BUNNEN med POST før du kan løse oppgaven.
+- HUSK: UTENLANDSKE ID-NUMMER. Hvis oppgaven oppgir et NIF, SSN, SIREN eller D-nummer, MÅ DU DROPPE DET i JSON-bodyen! Tripletex krasjer på norsk validering hvis du bruker 'nationalIdentityNumber'. Bare dropp ID-feltet helt ved opprettelse av ansatte!
+- HUSK: PRODUKTER. For POST /product, bruk feltnavnet 'number', ALDRI 'productNumber'. ALDRI send med noen form for pris-felter her. Prisen settes eksklusivt på ordrelinjen.
+- HUSK: MVA-KODER. Salg/Utgående = 3 (25%), 31 (15%), 33 (12%), 5 (0%). Kjøp/Inngående (Bilag) = 1 (25%), 11 (15%), 13 (12%), 5 (0%).
+- HUSK: BANKKONTO FOR FAKTURA. Får du feilen "Faktura kan ikke opprettes før selskapet har registrert et bankkontonummer"? Da må du sjekke at datoen du bruker er 2026! Ikke bruk 2023 eller 2024, for selskapet i sandkassen eksisterte ikke da.
+- HUSK: LEVERANDØRFAKTURA / BILAG (/ledger/voucher). Et bilag må alltid balansere til null. Lag ALDRI en egen postering for MVA. Bruk to linjer: Kostnadskonto (positivt beløp med vatType) og Leverandørgjeld 2400 (negativt beløp, supplier: {id}, INGEN vatType).
+- HUSK: FAKTURANUMMER PÅ BILAG. Oppgir oppgaven et fakturanummer (eks "INV-2026-4811") på en leverandørfaktura? Du MÅ legge dette i feltet "invoiceNumber": "INV-2026-4811" på den posteringen som går mot konto 2400.
+- HUSK: VALUTADIFFERANSE (Agio). Må føres som bilag med 3 linjer som går i null. Linje 1: Bank 1920 (Betalt beløp). Linje 2: Kundefordring 1500 (Opprinnelig fakturabeløp i minus) - denne MÅ ha "customer": {"id": X} og "invoice": {"id": Y}. Linje 3: Agio 8060 (Differansen).
+- HUSK: BANKAVSTEMMING (CSV). Penger INN er fra kunder -> Betal faktura via POST /payment. Penger UT er til leverandører -> Føres som bilag via POST /ledger/voucher (Konto 2400 og 1920). ALDRI prøv å finne utgående betalinger i /invoice.
+- HUSK: AVDELINGER (Department). Opprettelse av ansatt eller bilag krever ofte "department": {"id": <ID>}. Søk opp avdelingen (GET /department?name=X) først. Får du 0 treff, opprett den med POST.
+- HUSK: ANSATT-DETALJER (Employment Details). Feltet 'workingHoursScheme' MÅ være en tekststreng (f.eks "NOT_SHIFT"). Feltet 'occupationCode' MÅ være et objekt: {"id": <ID>}. Bruk GET /employee/employment/occupationCode for å finne ID først.
+- HUSK: PROSJEKTFAKTURA. Hvis oppgaven ber deg føre timer og fakturere, opprettes ordren AUTOMATISK når timene er ført! Bare søk opp ordren (GET /order) og gjør den om til faktura. ALDRI legg "project" i bodyen til en manuell ordre.
+- HUSK: FRIE DIMENSJONER. Opprette navn: POST /ledger/accountingDimensionName -> {"dimensionName": "Navn"}. Opprette verdi: POST /ledger/accountingDimensionValue -> {"description": "Verdien", "accountingDimensionName": {"id": <ID>}}. BRUK 'description', IKKE 'name' eller 'value'! Koble til bilag med "freeAccountingDimension1": {"id": <ID>} inni posteringen.
+- HUSK: KREDITNOTA. Beta-endepunktet (:createCreditNote) er ulovlig. Du må lage en helt ny ordre, legge til en ordrelinje med "count": -1, og opprette faktura på denne nye ordren for å reversere.
+- HUSK: NÅR DU ER FERDIG. Har du utført alle krav, avslutt UMIDDELBART. Send KUN {"status": "DONE"}. ALDRI gjenta et vellykket kall.
+- HUSK: DATO-FELLEN PÅ FAKTURA OG BILAG! Sandkassen din blir opprettet i dag. Hvis du bruker en dato i fortiden (f.eks. "2026-03-20"), vil Tripletex krasje og si "Faktura kan ikke opprettes før selskapet har registrert et bankkontonummer" fordi selskapet ikke eksisterte på den datoen! Du MÅ ALLTID bruke dagens dato: "2026-03-22" for "orderDate", "deliveryDate", "invoiceDate", "paymentDate" og bilagsdatoer!
+- HUSK: FORKAST "2026-03-20"! Uansett hva som står i gamle oppskrifter, bruk ALLTID "2026-03-22" som standarddato for alt du oppretter!
+- HUSK: 405 METHOD NOT ALLOWED på /bank/account eller /company betyr at endepunktet er stengt av dommerne. Du kan ikke fikse bankkontonummeret. Feilen ligger i DATOEN din (se regelen over).
+- HUSK: Når oppgaven ber deg om å "Create and send an invoice", betyr det bare at du skal opprette den perfekt i systemet med POST /invoice. Ikke let etter send-knapper, bare sørg for at JSON-bodyen (med 2026-03-22) validerer!
+- HUSK: PROSJEKTFAKTURA / PROJECT INVOICE: Ignorer tidligere advarsler! For å fakturere et prosjekt, MÅ du koble ordren til prosjektet! POST /order SKAL ha denne strukturen: {"customer": {"id": <K_ID>}, "project": {"id": <P_ID>}, "orderDate": "2026-03-20", "deliveryDate": "2026-03-20"}.
+- HUSK: ORDRELINJE FOR TIMER (Prosjektfaktura): Etter at du har opprettet ordren knyttet til prosjektet, oppretter du ordrelinjen manuelt (POST /order/orderline) med timene som "count" og timeprisen som "unitPriceExcludingVatCurrency". Eks: {"order": {"id": <O_ID>}, "description": "Timer Utvikling", "count": 27, "unitPriceExcludingVatCurrency": 800, "vatType": {"id": 3}}.
+- HUSK: TIMEREGISTRERING (POST /timesheet/entry): I tillegg til "employee", "project", "activity", "date" og "hours", MÅ du også ta med "hourlyRate": <PRIS> hvis oppgaven oppgir en timepris! Dette forteller Tripletex at timene er fakturerbare.
+- HUSK: DATO-FELLA OG BANKKONTO-FEILEN! Tripletex-sandkassen er konfigurert for 2026. Hvis du bruker fakturadatoer eller ordredatoer fra 2023, 2024 eller 2025, vil Tripletex krasje og si "Faktura kan ikke opprettes før selskapet har registrert et bankkontonummer" fordi kontoen ikke eksisterte da! BRUK ALLTID 2026 (f.eks "2026-03-20") FOR ALLE DATOER, uansett hva oppgaven sier!
+- HUSK: AKTIVITETER PÅ PROSJEKT: Ikke prøv å opprette (POST) aktiviteter hvis du er usikker på 'activityType'-formatet. Bruk ALLTID et GET /activity-søk først for å finne en eksisterende aktivitet (eks. "Konsulenttjenester") og bruk den ID-en!
+- HUSK: PROSJEKTFAKTURA: Når du har ført timer via POST /timesheet/entry, opprett fakturaen manuelt ved å lage POST /order (husk 2026-dato), POST /order/orderline med utregnet beløp for timene, og POST /invoice. Ikke bruk "project"-feltet inni selve ordren.
+- HUSK: TOLS SANDKASSE OG 0 TREFF: Hvis et GET-søk gir "0 TREFF!", betyr det at tingen garantert IKKE finnes! ALDRI gjør et nytt GET-søk for å dobbeltsjekke eller endre søkeord! Gå UMIDDELBART til POST for å opprette objektet (f.eks. POST /department med {"name": "Regnskap"}).
+- HUSK: PARAMETERE I GET-SØK: Når du gjør GET-søk, MÅ søkeordene legges i "params"-objektet! IKKE legg dem i "body" (det ignoreres av Tripletex og gir falske treff), og IKKE skriv dem i selve "endpoint"-strengen. (RIKTIG: "endpoint": "/department", "params": {"name": "Regnskap"}).
+- HUSK: ONBOARDING AV ANSATT: A) Finn eller opprett avdeling. B) POST /employee (Fornavn, etternavn, e-post, og "department": {"id": <ID>}). C) Finn Yrkeskode-ID via GET /employee/employment/occupationCode. D) Opprett detaljer via POST /employee/employment/details.
+- HUSK: LØNN / ARBEIDSFORHOLD (MANGLENDE FØDSELSDATO): Hvis oppgaven ber deg kjøre lønn, og 'GET /employee/employment' gir 0 treff, MÅ du opprette det. MEN: Tripletex krever fødselsdato. Oppdater alltid den ansatte først med PUT /employee/<ANSATT_ID> -> {"dateOfBirth": "1990-01-01"}. FØRST DA kan du kjøre POST /employee/employment -> {"employee": {"id": <ANSATT_ID>}, "startDate": "2026-01-01"}.
+- HUSK: PUT-OPPDATERINGER: Når du oppdaterer et objekt (f.eks. PUT /employee/12345), trenger du bare å sende feltet du vil endre i body (eks: {"dateOfBirth": "1990-01-01"}). Du trenger ikke sende med hele objektet. ID-en legges rett i endpoint-stien.
+- HUSK: LØNNSARTER (Salary Type): Ikke bruk unødvendig mange GET-søk. Gjør direkte søk! Fastlønn = GET /salary/type?name=Fastlønn. Bonus = GET /salary/type?name=Bonus.
+- HUSK: FRIE DIMENSJONSVERDIER: Ved POST /ledger/accountingDimensionValue MÅ du bruke feltet "code" for selve verdien, og "accountingDimension": {"id": <ID>} for å koble til forelderen! (IKKE bruk 'name', 'value' eller 'accountingDimensionName', da krasjer Tripletex).
+- HUSK: AKTIVITETSTYPE (activityType): Ved POST /activity må 'activityType' sendes som et HELTALL (integer), IKKE som en tekststreng (som "PROJECT" eller "GENERAL"). Søk med GET /activity først for å se hvilke heltall systemet forventer.
+- HUSK: FAKTURERE PROSJEKT-TIMER: Når du fører timer (POST /timesheet/entry), oppretter Tripletex en ordre AUTOMATISK i bakgrunnen! ALDRI opprett ordren manuelt for prosjekttimer. Gjør et GET /order-søk (f.eks på kunden) for å finne den autogenererte ordren, og send den til POST /invoice.
+- HUSK: ARBEIDSAVTALER / ONBOARDING: POST /employee/employment/details er ekstremt streng. Du MÅ ha med 'annualSalary' og 'percentageOfFullTimeEquivalent'. I tillegg MÅ du søke opp yrkeskoden via GET /employee/employment/occupationCode før du sender "occupationCode": {"id": <ID>}.
+- HUSK: 404 PÅ BETALING (/payment): Hvis du får 404 Object Not Found på POST /payment, har du brukt en konto (eks. 1920) som Tripletex ikke gjenkjenner som en gyldig "Bankkonto" i den tomme sandkassen. DROPP /payment, og bruk heller POST /ledger/voucher (Debet 1920, Kredit 1500 med customer og invoice) for å betale fakturaen manuelt!
+- HUSK: FORFALTE FAKTURAER (Overdue invoices): Hvis oppgaven nevner en forfalt faktura, så HAR dommerne lagt den der! ALDRI lag en fiktiv kunde eller faktura for å løse det. Bruk GET /invoice (husk ?invoiceDateFrom=2020-01-01&invoiceDateTo=2030-12-31) for å finne den!
+- HUSK: KORREKSJONS-OPPGAVER (Revisjon): Feilføringer i hovedboken skal KUN korrigeres med POST /ledger/voucher. Finn riktig beløp som skal flyttes, krediter (minus) den feilaktige kontoen, og debiter (pluss) den riktige kontoen på samme bilag.
+- HUSK: MÅNEDSAVSLUTNING (Avskrivninger): For å skrive av et anleggsmiddel årlig, deler du kjøpesummen KUN på antall år (ikke på 12). Skal du ha månedlig, deler du på (år * 12).
+- HUSK: ALDRI bruk POST /bank/account (det gir 405 Method Not Allowed). For å betale en faktura MÅ du alltid bruke GET /ledger/account?number=1920 for å finne riktig bankkonto-ID. Bruker du en annen tilfeldig konto-ID på POST /payment, får du 404 Object Not Found!
+- HUSK: BANKAVSTEMMING / KONTOAUSZUG (CSV-vedlegg): Fakturaene FINNES ALLEREDE i sandkassen! IKKE opprett dem på nytt! Les filen, finn fakturanummeret, og bruk GET /invoice?invoiceNumber=<NR> for å hente ID-en.
+- HUSK: For utbetalinger til leverandører i CSV-filen, finnes de IKKE i /invoice. Bokfør dem rett i regnskapet med POST /ledger/voucher (Kredit 1920 Bank, Debet 2400 Leverandørgjeld med supplier-ID).
+- HUSK: LEVERANDØRFAKTURA / INNGÅENDE BILAG: Når oppgaven oppgir et fakturanummer (f.eks "INV-2026-4811"), MÅ du legge det inn som "invoiceNumber": "INV-2026-4811" i selve posting-objektet som går mot leverandørgjelden (konto 2400)! Ellers finner ikke dommerne fakturaen.
+- HUSK: FORTEGN PÅ BILAG: På en leverandørfaktura skal kostnadskontoen (f.eks 7300) ha POSITIV "amountGross" og "vatType" (f.eks {"id": 1}). Leverandørkontoen (f.eks 2400) skal ha NEGATIV "amountGross", "supplier": {"id": <ID>} og "invoiceNumber", men INGEN vatType.
+- HUSK: Valideringsfeil 422 "Et bilag kan ikke registreres uten posteringer" eller "summen er ikke lik 0"? Sørg for at "postings"-arrayet ditt har nøyaktig to linjer (en positiv og en negativ) som balanserer hverandre perfekt ut!
+- HUSK: Når du oppretter en aktivitet (POST /activity), MÅ du koble den til prosjektet med "project": {"id": <PROSJEKT_ID>}. I tillegg MÅ du ha med feltet "activityType" som en ren tekststreng (gjør et GET /activity-søk først for å se den nøyaktige strengen systemet bruker, f.eks "PROJECT_ACTIVITY" eller lignende). ALDRI send activityType som et objekt med ID!
+- HUSK: For dataanalyse av hovedboken (som å finne kontoer med størst økning): Hent posteringene via GET /ledger/posting for begge periodene. Summer opp beløpene per kontonummer, finn differansen, og identifiser de 3 største. Deretter oppretter du 3 prosjekter (husk "projectManager": {"id": <ID>}) og 3 aktiviteter.
+- HUSK: AVDELING (Department): Du MÅ søke opp den spesifikke avdelingen fra PDF-en (GET /department?name=Navn). Får du 0 treff, MÅ du opprette den (POST /department). ALDRI bruk en tilfeldig avdeling fra et tomt søk! Koble den til ansatt i POST /employee med "department": {"id": <AVD_ID>}.
+- HUSK: YRKESKODE (Occupation Code): Du MÅ søke etter den spesifikke stillingstittelen fra PDF-en (GET /employee/employment/occupationCode?name=Tittel). ALDRI gjør et tomt søk og velg ID 1. Du MÅ bruke riktig yrkeskode-ID!
+- HUSK: Arbeidskontrakt / Employment Details: For å sette lønn, stillingsprosent og arbeidstid MÅ du gjøre POST /employee/employment/details.
+- HUSK: JSON-body for POST /employee/employment/details MÅ inneholde alle data fra PDF-en og se slik ut: {"employment": {"id": <EMP_ID>}, "date": "<STARTDATO>", "percentageOfFullTimeEquivalent": <PROSENT>, "annualSalary": <ÅRSLØNN>, "workingHoursScheme": "NOT_SHIFT", "occupationCode": {"id": <OCC_ID>}}
+- HUSK: "Konfigurer standard arbeidstid" betyr at du MÅ sette "workingHoursScheme": "NOT_SHIFT" inni employment details-objektet.
+- HUSK: Nasjonalt ID-nummer: Hvis oppgaven/PDF-en inneholder et fødselsnummer (national identity number), MÅ du ta det med i POST /employee som "nationalIdentityNumber": "12345678901". Ikke dropp det!
+- HUSK: Kutt ned på unødvendige API-kall! ALDRI gjør samme GET-søk to ganger på rad. Når du har funnet en ID (eller 0 treff), gå UMIDDELBART videre til neste logiske POST/PUT-steg!
+- HUSK: Hvis oppgaven/PDF-en inneholder et "national identity number" (fødselsnummer/D-nummer), MÅ du ta det med i POST /employee som "nationalIdentityNumber": "12345678901". IKKE dropp det med mindre du faktisk får en 422-feil på selve formatet!
+- HUSK: Opprettelse av Avdeling (Department): Bruk POST /department. ID-en du får tilbake MÅ legges direkte inn i POST /employee som "department": {"id": <AVD_ID>}.
+- HUSK: Arbeidskontrakt / Employment Details: For å sette lønn og yrkeskode MÅ du gjøre POST /employee/employment/details.
+- HUSK: Før du oppretter Employment Details, MÅ du finne yrkeskoden (Occupation Code) med GET /employee/employment/occupationCode. Noter deg ID-en til koden.
+- HUSK: JSON-body for POST /employee/employment/details MÅ se slik ut: {"employment": {"id": <EMP_ID>}, "date": "<STARTDATO>", "percentageOfFullTimeEquivalent": <PROSENT>, "annualSalary": <LØNN>, "workingHoursScheme": "NOT_SHIFT", "occupationCode": {"id": <OCC_ID>}}
+- HUSK: BANKAVSTEMMING (CSV): Ta én og én linje fra filen. Innbetalinger (penger INN) er fra KUNDER. Utbetalinger (penger UT) er til LEVERANDØRER.
+- HUSK: KUNDE-INNBETALINGER: Finn fakturaen med GET /invoice. Bokfør med POST /payment -> {"invoice": {"id": <F_ID>}, "account": {"id": <BANK_KONTO_ID>}, "amount": <CSV_BELØP>, "paymentDate": "YYYY-MM-DD"}. Delbetaling håndteres automatisk hvis summen er lavere!
+- HUSK: LEVERANDØR-UTBETALINGER: Leverandørfakturaer finnes IKKE i /invoice! For å registrere at du har betalt en leverandør, bruk POST /ledger/voucher. Body: {"date": "YYYY-MM-DD", "description": "Betaling leverandør", "postings":[{"account": {"id": <BANK_ID>}, "amountGross": -<BELØP>}, {"account": {"id": <2400_ID>}, "supplier": {"id": <LEV_ID>}, "amountGross": <BELØP>}]}
+- HUSK: Går du i loop på GET-søk fordi du får 0 treff? STOPP Å SØKE PÅ DET SAMME! Hvis du ikke finner en leverandørfaktura, bare bokfør utbetalingen som et bilag (/ledger/voucher) og gå til neste linje i CSV-filen.
+- HUSK: For å beregne "skattbart resultat" (taxable income / overskudd), ALDRI bruk GET /ledger/voucher! Bruk ALLTID GET /ledger/posting?dateFrom=2025-01-01&dateTo=2025-12-31&count=1000. Summer alle "amount" på resultatkontiene (3000-8999). 22 % av dette overskuddet bokføres deretter som skatt med POST /ledger/voucher (Debet 8700, Kredit 2920).
+- HUSK: Hvis oppgaven ber om ÅRLIG avskrivning (årleg / anual), del KUN kjøpesummen på antall år for å finne summen. IKKE del på 12 måneder! Bokfør på datoen 31.12 i det aktuelle året.
+- HUSK: Å reversere en forskuddsbetalt kostnad (prepaid expense) betyr å lage et bilag (POST /ledger/voucher) der du KREDITERER (minusbeløp) balansekontoen (f.eks. 1700), og DEBITERER (plussbeløp) riktig kostnadskonto i 6000-serien.
+- HUSK: For 'POST /employee/employment/details' MÅ feltet 'workingHoursScheme' være en ren tekststreng (f.eks. "NOT_SHIFT"), ALDRI et objekt. 
+- HUSK: For 'POST /employee/employment/details' MÅ feltet 'occupationCode' være et objekt: {"id": <ID>}, aldri et flatt tall.
+- HUSK: PANIKK-REGELEN! Hvis et API-kall feiler underveis (f.eks. på ordrelinje eller employment/details), SKAL DU ALDRI gå tilbake og prøve å opprette kunden eller den ansatte på nytt! Da får du "e-posten finnes allerede". Fiks JSON-bodyen for kallet som feilet i stedet!
+- HUSK: Aldri prøv å sende inn utenlandske ID-nummer i feltene 'nationalIdentityNumber', 'internationalId' eller 'dnumber' når du oppretter ansatte. Tripletex krasjer på streng norsk validering. Bare dropp ID-feltet helt!
+- HUSK: Hvis Tripletex svarer "department.id: Feltet må fylles ut" på en ansatt, må du søke opp avdelingen med GET /department og legge til "department": {"id": <AVD_ID>} i POST /employee.
+- HUSK: Frie dimensjonsverdier (POST /ledger/accountingDimensionValue) SKAL bruke feltet "description" for navnet på verdien, ALDRI "name" eller "value". Referansen er "accountingDimensionName": {"id": <ID>}.
+- HUSK: Ved bokføring av inngående bilag (POST /ledger/voucher), lag ALDRI en egen postering for MVA. Legg "vatType": {"id": <MVA_ID>} direkte på kostnadskonto-linjen. Systemet balanserer MVA automatisk.
+- HUSK: Skal du opprette en faktura? DU MÅ bygge den via POST /order -> POST /order/orderline -> POST /invoice. ALDRI bruk "project" i selve ordren, da krasjer faktureringen.
+- HUSK: Svar ALLTID KUN med ETT enkelt JSON-objekt for neste API-kall. Ingen hilsener, ingen forklaringer, ingen "DU GJORDE:"-tekst. Bare ren JSON.
+- HUSK: Før du oppretter en faktura (POST /invoice), MÅ du alltid opprette en bankkonto først hvis sandkassen er tom: POST /bank/account -> {"accountNumber": "12345678901", "name": "Driftskonto"}. Ellers får du valideringsfeil på fakturaen.
+- HUSK: Når du oppretter et produkt (POST /product), ALDRI send med noen form for pris-felter! Send KUN {"name": "Varenavn", "number": "1234"}. Prisen settes utelukkende på ordrelinjen (POST /order/orderline).
+- HUSK: Aldri gjør et tomt GET-søk. Du MÅ bruke parametere! For konto: GET /ledger/account?number=1500. For faktura: GET /invoice?invoiceDateFrom=2020-01-01&invoiceDateTo=2030-12-31.
+- HUSK: Ved bokføring av bilag (POST /ledger/voucher), ALDRI opprett en egen postering for MVA (konto 2710/2711). Bruk "vatType": {"id": <MVA_ID>} direkte på kostnads- eller inntektslinjen. Tripletex krasjer med "systemgenererte" feil hvis du prøver å føre MVA manuelt.
+- HUSK: Ved opprettelse av en Fri Dimensjonsverdi (POST /ledger/accountingDimensionValue), MÅ navnet på verdien legges i feltet "description", IKKE i "name", "value" eller "dimensionValue".
+- HUSK: Opprettelse av Reiseregning (POST /travelExpense) MÅ KUN ha "employee" og "title". Aldri legg ved datoer her. Datoer håndteres i cost/rate.
+- HUSK: Hvis et GET-søk returnerer "values":
+- HUSK: Verifiser påkrevde felter som activityType, sjekk at feltnavn eksisterer for spesifikt endepunkt, og valider at relasjons-ID-er har korrekte tilganger og mva-oppsett.
+- HUSK: Verifiser gyldige `vatType.id` via `/ledger/vatType` for å sikre kompatibilitet med produkt og konto før `POST /order/orderline`.
+- HUSK: Bruk feltnavnet 'number' i stedet for 'productNumber' for produkter, og verifiser nøyaktige feltnavn og gyldige ID-er i VatType-modellen før forespørsler.
+- HUSK: Verifiser `vatType.id`, unngå systemkontoer i `ledger/voucher.postings`, og påse at bankkontonummer er registrert før `/invoice`-kall.
+- HUSK: Verifiser alltid nøyaktige DTO-feltnavn og påkrevde relasjoner som userType og department.id mot Tripletex-dokumentasjonen for å unngå mapping- og valideringsfeil.
+- HUSK: Sett `vatLocked: true` ved opprettelse av resultatkonti og unngå manuelle `postings` mot systemkonti eller mva-rader som trigger systemgenererte feil i `/ledger/voucher`.
+- HUSK: Verifiser alltid eksakte feltnavn i DTO-modeller og påkrevde parameterformater i API-dokumentasjonen for å unngå ugyldige filtre og valideringsfeil.
+- HUSK: Svar kun med JSON og verifiser feltnavn samt gyldige ID-er mot Tripletex API-dokumentasjonen før hvert kall.
+- HUSK: Benytt feltnavnet 'account' for produktkontering og verifiser at valgt vatType-ID er gyldig for salgstransaksjoner.
+- HUSK: Verifiser gyldig `vatType.id` via `/ledger/vatType` før POST-kall til `/order/orderline`.
+- Bruk `priceExcludingVatCurrency` og verifiser mva-ID-er mot `/ledger/vatType` før opprettelse av produkter.
+- HUSK: Verifiser alltid nøyaktige feltnavn og hent gyldige ID-er fra systemet før bruk i API-kall og filtrering.
+- HUSK: Verifiser alltid nøyaktige feltnavn og obligatoriske modell-relasjoner mot Tripletex API-dokumentasjonen for å unngå validerings- og mappingfeil.
+- HUSK: Verifiser alltid obligatoriske felter, gyldige enum-verdier og objektstrukturer i API-dokumentasjonen før du sender forespørsler.
+- HUSK: Verifiser alltid nøyaktig objektstruktur og obligatoriske feltnavn i Tripletex API-dokumentasjonen før hvert kall.
+- HUSK: Verifiser alltid gjeldende DTO-feltnavn og gyldige system-ID-er i dokumentasjonen før du utfører API-kall for å unngå valideringsfeil.
+- HUSK: Hver postering i 'postings'-matrisen må inneholde feltet 'row' med stigende nummerering som starter på 1.
+- HUSK: Match alltid amountGrossCurrency med beløp, verifiser kontoers mva-låsing, og bruk korrekte aktivitetstyper og gyldig JSON.
+- HUSK: Sjekk alltid om kontonummeret eksisterer via GET før du sender POST-forespørsel for å unngå duplikater.
+- HUSK: Returner utelukkende JSON og verifiser at `bankAccountNumber` er utfylt via GET /company før POST /invoice.
+- HUSK: Inkluder påkrevde invoiceDateFrom og invoiceDateTo i query, og bruk kun 'amount' i fields-filteret i stedet for 'amountRemaining', 'totalAmountOpeningBalance', 'totalAmountGross' eller 'totalAmountIncludingVat'.
+- HUSK: Bruk `employmentDetails` for `division` og `percentage`, inkluder `employee.dateOfBirth`, bruk `employee` i stedet for `employment` i `salary/transaction`, og match `amountGrossCurrency` med `amountGross` ved bruk av `vatType` id 3 i `ledger/voucher`.
+- HUSK: Krev `email` og `userType` på `/employee`, og bruk utelukkende `percentageOfFullTimeEquivalent`, `annualSalary`, samt objekt-referanser for `workingHoursScheme` og `occupationCode` i `/employee/employment/details`.
+- HUSK: Spesifiser alltid `amountGrossCurrency` med identisk verdi som `amountGross` i alle `postings`.
+- HUSK: Verifiser alltid korrekte endepunkter, feltnavn og forutsetninger som bankkontonummer i API-dokumentasjonen før forespørsler utføres.
+- HUSK: Sørg for at selskapet har et registrert bankkontonummer med nøyaktig 11 siffer uten skilletegn før fakturering, og bruk alltid korrekt HTTP-metode for API-endepunktene.
+- HUSK: Ikke opprett manuelle posteringer på systemkontoer eller MVA-linjer som Tripletex genererer automatisk basert på vatType-feltet.
+- HUSK: Svar alltid med ren JSON og verifiser nøyaktige feltnavn og objekt-ID-er mot Tripletex-dokumentasjonen før API-kall utføres.
+- HUSK: Verifiser at `vatType` på posteringen samsvarer med kontoens mva-oppsett i Tripletex, da mange resultatkontoer er låst til kode 0.
+- HUSK: Ved opprettelse av prosjekter (POST /project) i Tripletex må feltet `startDate` alltid inkluderes i forespørselen.
+- HUSK: Inkluder alltid påkrevde filtreringsparametre som `orderDateFrom` og `orderDateTo` ved GET-kall til `/order`.
+- HUSK: Verifiser alltid feltnavn (nationalIdentityNumber), obligatoriske felter (userType) og korrekt format for systemverdier i dokumentasjonen før API-kall.
+- HUSK: Verifiser alltid nøyaktige feltnavn og påkrevde parametere i Tripletex API-dokumentasjonen for hvert spesifikke endepunkt for å unngå mapping- og valideringsfeil.
+- HUSK: Når du har utført alle kravene i oppgaven (f.eks. opprettet alle 3 avdelingene), MÅ du avslutte umiddelbart! ALDRI gjenta et vellykket API-kall. Send KUN {"status": "DONE"} med en gang oppgaven er løst.
+Eksempel:
+{
+  "feil": "Fortsatte å sende POST /department for 'Produksjon' etter at alle tre avdelingene allerede var opprettet.",
+  "riktig": {"status": "DONE"}
+}
+- HUSK: Bilag må balansere til null med 'row'-indeks, og selskapsdata som bankkonto må verifiseres før fakturering.
+Eksempel:
+{
+  "feil": {
+    "postings": [
+      {
+        "amountGross": 38900,
+        "account": {
+          "id": 123
+        }
+      }
+    ]
+  },
+  "riktig": {
+    "postings": [
+      {
+        "row": 1,
+        "amountGross": 38900,
+        "account": {
+          "id": 123
+        }
+      },
+      {
+        "row": 2,
+        "amountGross": -38900,
+        "account": {
+          "id": 456
+        }
+      }
+    ]
+  }
+}
+
+
+- HUSK: 'workingHoursScheme' krever en enkel verdi (ikke objekt), og e-postadresser må være unike før opprettelse.
+Eksempel:
+{
+  "feil": {
+    "workingHoursScheme": {
+      "id": 50
+    },
+    "email": "allerede_eksisterende@mail.no"
+  },
+  "riktig": {
+    "workingHoursScheme": 50,
+    "email": "ny_unik_adresse@mail.no"
+  }
+}
+
+
+- HUSK: Bruk endepunktet /ledger/payment i stedet for /payment, og verifiser at ID-ene for både 'invoice' og 'account' faktisk eksisterer.
+Eksempel:
+{
+  "feil": {
+    "url": "POST /payment",
+    "body": {
+      "invoice": {
+        "id": 2147590900
+      },
+      "account": {
+        "id": 463179117
+      }
+    }
+  },
+  "riktig": {
+    "url": "POST /ledger/payment",
+    "body": {
+      "invoice": {
+        "id": "EKSISTERENDE_ID"
+      },
+      "account": {
+        "id": "BEKREFTET_ID"
+      }
+    }
+  }
+}
+
+- HUSK: Ved opprettelse av ansatte via `POST /employee` er `department.id` et obligatorisk felt som må inkluderes.
+- HUSK: Svar kun med JSON og sørg for at `activityType` i `/activity`-kall er inkludert med en gyldig enum-verdi.
+- HUSK: På POST /ledger/accountingDimensionValue heter IKKE feltet for verdien 'name', 'value', 'description', 'dimensionValue' eller 'label' (de gir "Feltet eksisterer ikke"). Prøv i stedet 'accountingDimensionValue', 'dimensionName' eller 'number'! Pass også på at referansen til forelderen er "accountingDimensionName": {"id": <ID>}.
+- HUSK: For å koble en fri regnskapsdimensjon til et bilag, MÅ du legge inn "freeAccountingDimension1": {"id": <VERDI_ID>} inni selve "postings"-objektet for kostnadskontoen (f.eks konto 7140).
+- HUSK: Et bilag (POST /ledger/voucher) MÅ alltid ha minst to linjer i 'postings' (f.eks en i debet og en i kredit) som går i null. Bruk 'amountGross' med pluss og minus. Aldri før MVA på egne linjer.
+[
+  {
+    "feil": "Manglende obligatoriske felt som 'postings' i bilag eller 'employeeId' i l\u00f8nnskompilering.",
+    "losning": "Sikre at alle foresp\u00f8rsler inkluderer p\u00e5krevde objekter og ID-er i henhold til API-spesifikasjonen for \u00e5 unng\u00e5 422 VALIDATION_ERROR."
+  },
+  {
+    "feil": "Ugyldige feltnavn i 'fields'-parameteren (f.eks. 'vatRate' i VatTypeDTO).",
+    "losning": "Verifiser n\u00f8yaktige feltnavn mot gjeldende DTO-modell i Tripletex API-dokumentasjonen f\u00f8r bruk av filtrering i sp\u00f8rrestrengen."
+  },
+  {
+    "regel_tekst": "- HUSK: Inkluder alltid alle p\u00e5krevde felter (som 'projectManager', 'startDate' og 'userType') og bruk korrekte Enum-verdier for \u00e5 unng\u00e5 422-valideringsfeil.",
+    "json_eksempel": {
+      "feil_gjetting": {
+        "name": "Migration Project",
+        "customer": {
+          "id": 108496802
+        }
+      },
+      "riktig_losning": {
+        "name": "Migration Project",
+        "customer": {
+          "id": 108496802
+        },
+        "projectManager": {
+          "id": 18719985
+        },
+        "startDate": "2024-01-01"
+      }
+    }
+  },
+  {
+    "regel_tekst": "- HUSK: Bruk ledgerType 'GENERAL' (ikke 'BALANCE') ved opprettelse av konto, og fjern 'vatType' fra bilagsposter som ikke skal ha mva (f.eks. avskrivning) for \u00e5 unng\u00e5 feil om systemgenererte rader.",
+    "json_eksempel": {
+      "feil_gjetting": {
+        "ledgerType": "BALANCE",
+        "postings": [
+          {
+            "account": {
+              "id": 123
+            },
+            "amountGross": 1000,
+            "vatType": {
+              "id": 5
+            }
+          }
+        ]
+      },
+      "riktig_losning": {
+        "ledgerType": "GENERAL",
+        "postings": [
+          {
+            "account": {
+              "id": 123
+            },
+            "amountGross": 1000
+          }
+        ]
+      }
+    }
+  }
+]- HUSK: Svar kun med JSON, verifiser endepunkter og feltnavn i dokumentasjonen, og bruk query-parametre istedenfor body i GET-kall.
+- HUSK: Verifiser feltnavn i API-modellen og bruk heltall (integers) i stedet for tekststrenger for enum-verdier som 'activityType'.
+- HUSK: Verifiser alltid nøyaktig endepunktsti, tillatt HTTP-metode og gjeldende objekt-skjema i API-dokumentasjonen før hvert kall.
+- HUSK: Bruk feltnavnene 'value' og 'accountingDimension' (ikke 'description' eller 'accountingDimensionName') for objektet accountingDimensionValue.
+- HUSK: Verifiser feltnavn mot Tripletex-dokumentasjonen og svar utelukkende i JSON-format.
+- HUSK: Verifiser endepunkter, påkrevde parametere og gyldige DTO-felt i dokumentasjonen før hvert API-kall.
+- HUSK: Verifiser alle feltnavn og påkrevde parametere mot API-dokumentasjonen, bruk paginering på store datasett, og returner alltid svar i korrekt JSON-format.
+- HUSK: Bruk feltnavnene `code` (for verdien) og `accountingDimension` (for dimensjonskoblingen) når du poster til `/ledger/accountingDimensionValue`.
+- HUSK: Verifiser alltid støttede HTTP-metoder og nøyaktig feltstruktur i API-dokumentasjonen før du sender forespørsler.
+- HUSK: Verifiser alltid feltnavn mot Tripletex API-dokumentasjonen før bruk og returner utelukkende JSON-svar.
+- HUSK: Verifiser alltid endepunktstier, støttede HTTP-metoder og korrekte modellfelter i Tripletex API-dokumentasjonen før forespørsler sendes.
+- HUSK: Utelat `invoice`-objektet fra voucher-postings (bruk eventuelt `invoiceNumber`) og aksesser spesifikke ressurser direkte via korrekt `/resource/{id}`-sti.
+- HUSK: Bruk `invoiceNumber` (ikke et objekt) i `ledger/voucher`-posteringer og aksesser spesifikke ressurser direkte via `/ressurs/{id}` i URL-stien.
+- HUSK: Verifiser korrekte endepunktstier og støttede HTTP-metoder i dokumentasjonen, da `/ledger/payment` ikke eksisterer og `/bank/account` krever spesifikke parametere eller metoder.
+Tripletex — AI Accounting Agent
+Build an AI agent that completes accounting tasks in Tripletex. You receive a task prompt (in one of 7 languages), use the Tripletex API to execute it, and get scored on correctness and efficiency.
+How It Works
+
+Submit your HTTPS endpoint URL on the platform
+We provision a fresh Tripletex sandbox account
+We send a randomly selected accounting task to your /solve endpoint
+Your agent reads the prompt, optionally processes attached files (PDFs, images)
+Your agent calls the Tripletex API via a proxy to complete the task
+We verify the result field-by-field against expected values
+Your score updates on the rolling leaderboard
+
+Each submission gets a brand new Tripletex account — you always start from scratch.
+Key Facts
+
+
+
+
+
+
+
+
+
+Task types
+30 different accounting tasks
+
+
+Variants
+56 per task (7 languages × 8 data sets)
+
+
+Language
+Prompts in Norwegian, English, Spanish, Portuguese, Nynorsk, German, French
+
+
+Timeout
+5 minutes per submission
+
+
+API
+Tripletex v2 REST API via authenticated proxy
+
+
+Scoring
+Field-by-field checks + efficiency bonus, best score per task kept
+
+
+Score range
+0.0 (failed) — up to 6.0 (perfect Tier 3 + best efficiency)
+
+
+Files
+Some tasks include PDF or image attachments
+
+
+
+Quick Start
+
+Build a /solve endpoint that accepts POST requests with a task prompt and Tripletex credentials
+Use an LLM to interpret the Norwegian prompt and decide which API calls to make
+Call the Tripletex API using the provided proxy URL and session token
+Return {"status": "completed"} when done
+Submit your endpoint URL at https://app.ainm.no/submit/tripletex
+
+Task Categories
+Your agent will encounter tasks like:
+
+Employees — Create employees, set roles, update contact info
+Customers & Products — Register customers, create products
+Invoicing — Create invoices, register payments, issue credit notes
+Travel Expenses — Register or delete travel expense reports
+Projects — Create projects linked to customers
+Corrections — Delete or reverse incorrect entries
+Departments — Create departments, enable accounting modules
+
+Tasks range from simple single-API-call operations to multi-step workflows requiring several resources to be created and linked together.
+
+Tripletex — Sandbox Account
+Every team gets a free Tripletex sandbox account to explore the API and web interface before submitting to the competition.
+Getting Your Sandbox
+
+Go to the Tripletex submission page on the platform
+Click "Get Sandbox Account"
+Your sandbox is provisioned instantly
+
+You'll receive:
+
+Tripletex UI URL — log in and explore the accounting interface
+API base URL — call the Tripletex v2 REST API directly
+Session token — authenticate your API calls
+
+Logging Into the Web UI
+
+Go to https://kkpqfuj-amager.tripletex.dev
+Enter the email shown on your sandbox card
+Click "Forgot password" to set up your Visma Connect account (first time only)
+Set a password and log in
+
+Once you've set up Visma Connect, the same credentials work for all Tripletex test accounts — including the ones created during competition submissions.
+Using the API
+Authenticate with Basic Auth using 0 as username and the session token as password:
+import requests
+ 
+BASE_URL = "https://kkpqfuj-amager.tripletex.dev/v2"
+SESSION_TOKEN = "your-session-token-here"
+ 
+# List employees
+response = requests.get(
+    f"{BASE_URL}/employee",
+    auth=("0", SESSION_TOKEN),
+    params={"fields": "id,firstName,lastName,email"}
+)
+print(response.json())
+ 
+# Create a customer
+response = requests.post(
+    f"{BASE_URL}/customer",
+    auth=("0", SESSION_TOKEN),
+    json={
+        "name": "Test Customer AS",
+        "email": "test@example.com",
+        "isCustomer": True,
+    }
+)
+print(response.json())
+# curl example
+curl -u "0:your-session-token-here" \
+  "https://kkpqfuj-amager.tripletex.dev/v2/employee?fields=id,firstName,lastName"
+What You Can Do
+The sandbox is a full Tripletex test environment. Use it to:
+
+Explore the API — try creating employees, customers, invoices, and more
+See the UI — understand what the accounting data looks like in the interface
+Test your agent — point your /solve endpoint at the sandbox to debug
+Learn the data model — see how resources relate to each other
+
+Key Differences from Competition
+
+
+
+
+Sandbox
+Competition
+
+
+
+
+Account
+Persistent, yours to keep
+Fresh account per submission
+
+
+API access
+Direct to Tripletex
+Via authenticated proxy
+
+
+Data
+Accumulates over time
+Starts empty each time
+
+
+Scoring
+None
+Automated field-by-field
+
+
+
+Tips
+
+Create some test data manually in the UI, then query it via the API to understand the response format
+Try the same operations your agent will need: creating employees, invoices, products, etc.
+The sandbox token expires March 31, 2026
+Each team gets one sandbox — all team members share it
+
+Tripletex — Endpoint Specification
+Your agent must expose a single HTTPS endpoint that accepts POST requests.
+/solve Endpoint
+Method: POST
+Content-Type: application/json
+Timeout: 300 seconds (5 minutes)
+Request Format
+{
+  "prompt": "Opprett en ansatt med navn Ola Nordmann, ola@example.org. Han skal være kontoadministrator.",
+  "files": [
+    {
+      "filename": "faktura.pdf",
+      "content_base64": "JVBERi0xLjQg...",
+      "mime_type": "application/pdf"
+    }
+  ],
+  "tripletex_credentials": {
+    "base_url": "https://tx-proxy.ainm.no/v2",
+    "session_token": "abc123..."
+  }
+}
+
+
+
+Field
+Type
+Description
+
+
+
+
+prompt
+string
+The task in Norwegian natural language
+
+
+files
+array
+Attachments (PDFs, images) — may be empty
+
+
+files[].filename
+string
+Original filename
+
+
+files[].content_base64
+string
+Base64-encoded file content
+
+
+files[].mime_type
+string
+MIME type (application/pdf, image/png, etc.)
+
+
+tripletex_credentials.base_url
+string
+Proxy API URL — use this instead of the standard Tripletex URL
+
+
+tripletex_credentials.session_token
+string
+Session token for authentication
+
+
+
+Response Format
+Return this JSON when your agent has finished executing the task:
+{
+  "status": "completed"
+}
+Authentication
+Your agent authenticates with the Tripletex API using Basic Auth:
+
+Username: 0 (zero)
+Password: the session_token value from the request
+
+import requests
+ 
+response = requests.get(
+    f"{base_url}/employee",
+    auth=("0", session_token),
+    params={"fields": "id,firstName,lastName,email"}
+)
+API Key (Optional)
+If you set an API key when submitting your endpoint, we send it as a Bearer token:
+Authorization: Bearer <your-api-key>
+
+Use this to protect your endpoint from unauthorized access.
+Requirements
+
+Endpoint must be HTTPS
+Must respond within 5 minutes (300 seconds)
+Must return {"status": "completed"} with HTTP 200
+All Tripletex API calls must go through the provided base_url (proxy)
+
+Tripletex API Reference
+All standard Tripletex v2 endpoints are available through the proxy. Common endpoints:
+
+
+
+Endpoint
+Methods
+Description
+
+
+
+
+/employee
+GET, POST, PUT
+Manage employees
+
+
+/customer
+GET, POST, PUT
+Manage customers
+
+
+/product
+GET, POST
+Manage products
+
+
+/invoice
+GET, POST
+Create and query invoices
+
+
+/order
+GET, POST
+Manage orders
+
+
+/travelExpense
+GET, POST, PUT, DELETE
+Travel expense reports
+
+
+/project
+GET, POST
+Manage projects
+
+
+/department
+GET, POST
+Manage departments
+
+
+/ledger/account
+GET
+Query chart of accounts
+
+
+/ledger/posting
+GET
+Query ledger postings
+
+
+/ledger/voucher
+GET, POST, DELETE
+Manage vouchers
+
+
+
+API Tips
+
+Use the fields parameter to select specific fields: ?fields=id,firstName,lastName,*
+Use count and from for pagination: ?from=0&count=100
+POST/PUT requests take JSON body
+DELETE requests use the ID in the URL path: DELETE /employee/123
+List responses are wrapped: {"fullResultSize": N, "values": [...]}
+
+Tripletex — Scoring
+Field-by-Field Verification (Correctness)
+After your agent responds, we query the Tripletex API to verify what was created or modified. Each task has specific checks worth different point values.
+Example for a "Create employee" task (max 10 points):
+
+
+
+Check
+Points
+
+
+
+
+Employee found
+2
+
+
+Correct first name
+1
+
+
+Correct last name
+1
+
+
+Correct email
+1
+
+
+Administrator role assigned
+5
+
+
+
+The raw score is normalized to 0–1: correctness = points_earned / max_points (e.g., 8/10 = 0.8).
+Tier Multiplier
+Each task has a difficulty tier that multiplies your correctness score:
+
+
+
+Tier
+Multiplier
+Example tasks
+
+
+
+
+Tier 1
+×1
+Create employee, create customer
+
+
+Tier 2
+×2
+Create invoice, register payment
+
+
+Tier 3
+×3
+Complex multi-step workflows
+
+
+
+So a perfect score on a Tier 2 task = 1.0 × 2 = 2.0 base score.
+Efficiency Bonus
+If your agent achieves a perfect correctness score (1.0), you receive an efficiency bonus that can up to double your tier score.
+Two factors determine the bonus:
+Call efficiency — How many API calls did your agent make compared to the best known solution for this task? Fewer calls = higher bonus.
+Error cleanliness — How many of your API calls resulted in 4xx errors (400, 404, 422, etc.)? Errors reduce the bonus. An agent that gets it right without trial-and-error is rewarded.
+
+
+
+Scenario (Tier 2 task)
+Score
+
+
+
+
+Failed all checks
+0.0
+
+
+80% of checks passed
+1.6
+
+
+Perfect, but many errors and extra calls
+~2.1
+
+
+Perfect, efficient, a few errors
+~2.6
+
+
+Perfect, best-in-class efficiency, zero errors
+4.0
+
+
+
+The efficiency bonus only applies to perfect submissions. Non-perfect submissions score correctness × tier.
+Efficiency benchmarks are recalculated periodically. As teams find more efficient solutions, the bar rises for everyone. Your best score per task is recalculated against current benchmarks every 12 hours.
+Best Score Per Task
+Your score per task is your all-time best. Bad runs never lower your score — only improvements count.
+
+One good run is enough to lock in a score
+You can always improve by submitting again
+Focus on building a better agent, not grinding to recover from bad luck
+Each of the 30 tasks tracks independently
+
+Leaderboard
+Total leaderboard score = sum of best scores across all task types.
+The more task types your agent handles well, the higher your potential score.
+Task Assignment
+Each submission receives one task, weighted toward tasks you've attempted less. Over many submissions, you'll encounter all task types. Tasks are grouped into three tiers:
+
+Tier 1 — foundational tasks (e.g., create employee, create customer, create invoice)
+Tier 2 — multi-step workflows (e.g., invoice with payment, credit notes, project billing)
+Tier 3 — complex scenarios (e.g., bank reconciliation from CSV, error correction in ledger, year-end closing)
+
+Each task has 56 unique variants (7 languages × 8 data sets), so you'll rarely see the same prompt twice.
+Tier Release Schedule
+Tasks are released in tiers throughout the competition:
+
+Tier 1 — available from competition start
+Tier 2 — opens early Friday. Check this page for updates.
+Tier 3 — opens early Saturday. Check this page for updates.
+
+This gives you time to build a solid agent on simpler tasks before tackling the harder ones.
+Rate Limits
+
+
+
+Limit
+Verified teams
+
+Concurrent submissions
+3
+
+Per task per day
+5
+
+
+Tripletex — Examples
+Minimal /solve Endpoint
+import base64
+from pathlib import Path
+ 
+import requests
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+ 
+app = FastAPI()
+ 
+@app.post("/solve")
+async def solve(request: Request):
+    body = await request.json()
+    prompt = body["prompt"]
+    files = body.get("files", [])
+    creds = body["tripletex_credentials"]
+ 
+    base_url = creds["base_url"]
+    token = creds["session_token"]
+    auth = ("0", token)
+ 
+    for f in files:
+        data = base64.b64decode(f["content_base64"])
+        Path(f["filename"]).write_bytes(data)
+ 
+    # TODO: Use an LLM to interpret the prompt and execute
+    # the appropriate Tripletex API calls
+ 
+    return JSONResponse({"status": "completed"})
+Run with:
+pip install fastapi uvicorn requests
+uvicorn main:app --host 0.0.0.0 --port 8000
+Expose locally via HTTPS for testing:
+npx cloudflared tunnel --url http://localhost:8000
+Tripletex API Examples
+List employees
+resp = requests.get(
+    f"{base_url}/employee",
+    auth=auth,
+    params={"fields": "id,firstName,lastName,email"}
+)
+employees = resp.json()["values"]
+Create a customer
+resp = requests.post(
+    f"{base_url}/customer",
+    auth=auth,
+    json={
+        "name": "Acme AS",
+        "email": "post@acme.no",
+        "isCustomer": True
+    }
+)
+customer_id = resp.json()["value"]["id"]
+Create an invoice
+today = "2026-03-03"
+resp = requests.post(
+    f"{base_url}/invoice",
+    auth=auth,
+    json={
+        "invoiceDate": today,
+        "invoiceDueDate": today,
+        "customer": {"id": customer_id},
+        "orders": [{"id": order_id}]
+    }
+)
+Search for a specific entity
+resp = requests.get(
+    f"{base_url}/customer",
+    auth=auth,
+    params={
+        "name": "Acme",
+        "fields": "id,name,email",
+        "count": 10
+    }
+)
+matches = resp.json()["values"]
+Building an Effective Agent
+
+Parse the prompt — Use an LLM to extract the task type, entity names, field values, and relationships from the Norwegian prompt
+Handle files — Some tasks include PDFs with invoices, contracts, or expense reports. Decode from base64 and extract relevant data
+Map to API calls — Determine which Tripletex endpoints to call and in what order. Some tasks require creating prerequisites first
+Verify your work — After creating entities, query back to confirm they exist with correct values
+Handle errors — Tripletex returns detailed error messages. Parse them to retry with corrections
+
+Common Task Patterns
+
+
+
+Pattern
+Example
+API Flow
+
+
+
+
+Create single entity
+"Create employee Ola Nordmann"
+POST /employee
+
+
+Create with linking
+"Create invoice for customer"
+GET /customer → POST /order → POST /invoice
+
+
+Modify existing
+"Add phone to contact"
+GET /customer → PUT /customer/{id}
+
+
+Delete/reverse
+"Delete travel expense"
+GET /travelExpense → DELETE /travelExpense/{id}
+
+
+Multi-step setup
+"Register payment"
+POST /customer → POST /invoice → POST /payment
+
+
+
+Common Errors
+
+
+
+Error
+Cause
+Fix
+
+
+
+
+401 Unauthorized
+Wrong auth format
+Use Basic Auth with username 0 and session token as password
+
+
+404 Not Found
+Wrong endpoint path
+Check the Tripletex v2 API docs for correct paths
+
+
+422 Validation Error
+Missing required fields
+Read error message — it specifies which fields are required
+
+
+Empty values array
+No results found
+Check search parameters, try broader search
+
+
+Timeout (5 min)
+Agent too slow
+Optimize API calls, reduce unnecessary requests
+
+
+
+Tips
+
+The Tripletex sandbox starts empty — you may need to create prerequisites (customer, product) before creating invoices
+Use ?fields=* to see all available fields on an entity
+Some tasks require enabling modules first (e.g., department accounting)
+Norwegian characters (æ, ø, å) work fine in API requests — send as UTF-8
+All API calls through the proxy are logged — use them for debugging in the submissions view
+Prompts come in 7 languages (nb, en, es, pt, nn, de, fr) — your agent should handle all of them
+
+Optimizing for Efficiency
+Your score can go above 1.0 if you achieve perfect correctness with minimal API calls and zero errors. Higher-tier tasks have higher score ceilings (up to 6.0 for Tier 3). Tips:
+
+Plan before calling — Parse the prompt fully before making API calls. Understand what needs to be created/modified before starting
+Avoid trial-and-error — Every 4xx error (400, 404, 422) reduces your efficiency bonus. Validate inputs before sending
+Minimize GET calls — Don't fetch entities you don't need. If you created something, you already know its ID from the response
+Batch where possible — Some Tripletex endpoints accept lists. Use them instead of multiple individual calls
+Read error messages — If a call fails, the Tripletex error message tells you exactly what's wrong. Fix it in one retry, not several
+
+- HUSK: Svar kun med JSON og verifiser alle feltnavn, metoder og forretningsregler mot Tripletex API-dokumentasjonen før hvert kall.
+- HUSK: Inkluder kun eksisterende felt fra den spesifikke DTO-modellen i API-dokumentasjonen når du bruker `fields`-filteret.
+- HUSK: Verifiser alltid feltnavn og objekt-nesting mot Tripletex API-dokumentasjonens DTO-spesifikasjon for det aktuelle endepunktet for å sikre korrekt mapping av relasjonsfelter.
+- HUSK: Verifiser korrekte InvoiceDTO-feltnavn i dokumentasjonen og returner alltid svar i rent JSON-format.
+- HUSK: Utelat 'project'-feltet i POST /activity og bruk korrekt enum-verdi for 'activityType'.
+- HUSK: BANKKONTO-FEIL PÅ FAKTURA ("Faktura kan ikke opprettes før selskapet har registrert et bankkontonummer"): Endepunktene /bank/account og /company er STENGT av dommerne (gir 405-feil). Du MÅ registrere bankkontoen via regnskapskontoen! Gjør GET /ledger/account?number=1920 for å finne ID. Kjør deretter PUT /ledger/account/<ID> med body: {"id": <ID>, "bankAccount": "12345678901", "isBankAccount": true}. ETTER dette kallet, vil POST /invoice fungere perfekt!
+- HUSK: SEND FAKTURA: Hvis oppgaven ber deg om å "send an invoice" (sende fakturaen), MÅ du inkludere "sendToCustomer": true i JSON-bodyen på POST /invoice-kallet ditt!
+- HUSK: Inkluder alltid påkrevde parametere som dateFrom og dateTo i API-kall, unngå tomme spørringer, og returner utelukkende svar i JSON-format.
+- HUSK: ALDRI bruk GET med en JSON-body! GET-kall ignorerer "body". Hvis du skal opprette et prosjekt, en ordre eller timer, MÅ du bruke method "POST"! 
+- HUSK: TIMEREGISTRERING PÅ PROSJEKT: Ikke bruk GET /timesheet/entry for å lete etter timene. Bare opprett dem direkte med POST /timesheet/entry -> {"employee": {"id": X}, "project": {"id": Y}, "activity": {"id": Z}, "date": "2026-03-22", "hours": 62}. Gjør dette for hver ansatt.
+- HUSK: LEVERANDØRKOSTNAD PÅ PROSJEKT (Supplier cost on project): Først, opprett leverandøren (POST /customer med "isSupplier": true). Deretter, bokfør kostnaden med POST /ledger/voucher! For å knytte kostnaden til prosjektet MÅ du legge "project": {"id": <PROSJEKT_ID>} inni selve posteringen for kostnadskontoen (f.eks konto 6700 eller 4000). Balanser med konto 2400.
+- HUSK: FAKTURERE ET PROSJEKT: Når alle timer og kostnader er registrert, sjekk om Tripletex har laget en ordre automatisk (GET /order). Hvis den finnes, lag faktura av den (POST /invoice). Hvis den IKKE finnes, lag ordren manuelt (POST /order) og legg inn manuelle ordrelinjer for timene og kostnadene før du fakturerer!
+- HUSK: ANSATT MÅ HA AVDELING! Mangler avdeling? POST /department -> {"name": "Generell"}. Bruk denne ID-en når du gjør POST /employee.
+- HUSK: Verifiser eksakte feltnavn og objektstrukturer mot dokumentasjonen, da Tripletex ofte krever spesifikke nøkler som `invoiceId` eller objekt-referanser fremfor generiske feltnavn.
+- HUSK: REISE-UTLEGG (POST /travelExpense/cost): Beløpet på en kvittering MÅ ligge i feltet "amountCurrencyIncVat" (IKKE amountGross eller cost). Utlegget KREVER også "paymentType": {"id": <PT_ID>} og "costCategory": {"id": <CC_ID>}. Gjør GET-søk på /travelExpense/paymentType og /travelExpense/costCategory for å finne ID-ene du trenger før du oppretter utlegget!
+- HUSK: REISE-DIETT (POST /travelExpense/rate): Diett har INGEN felter for pris/beløp (ikke bruk 'amount' eller 'rate'). Du sender KUN antall dager i feltet "count". I tillegg MÅ du ha "rateCategory": {"id": <RC_ID>} og "zone": {"id": <Z_ID>}. Søk opp disse med GET /travelExpense/rateCategory og GET /travelExpense/zone først!
+- HUSK: RELASJONEN PÅ DIETT (/travelExpense/rate): Hvis Tripletex sier at objektet "travelExpense" ikke eksisterer inni rate-koden din, prøv i stedet å bruke parameter-ID i URLen eller sjekk DTO-dokumentasjonen for hva reise-referansen heter (noen ganger krever den bare "travelExpenseId": <ID> som et flatt tall).
+- HUSK: YRKESKODE / OCCUPATION CODE: Når du søker etter en firesifret yrkeskode fra en kontrakt (f.eks "4110"), MÅ du bruke parameteren "code", IKKE "name"! (Eks: GET /employee/employment/occupationCode?code=4110). Hvis du får 1000 treff, har du søkt feil og velger feil yrke! Du SKAL ha 1 treff.
+- HUSK: PERSONALNUMMER / NATIONAL IDENTITY NUMBER: Du MÅ inkludere ID-nummeret fra kontrakten når du oppretter ansatt med POST /employee. Bruk feltet "nationalIdentityNumber" for fødselsnummer (11 siffer), og "employeeNumber" for ansattnummer. IKKE dropp disse feltene hvis de står i oppgaven/PDF-en!
+- HUSK: LØNN & STILLINGSPROSENT: For å få 100% på onboarding-oppgaver, sjekk at POST /employee/employment/details inneholder "annualSalary" (årslønn), 
+"percentageOfFullTimeEquivalent" (prosent), "workingHoursScheme": "NOT_SHIFT", og riktig "occupationCode": {"id": <KORREKT_ID>}.
+- HUSK: PROSJEKTFAKTURA: Ordren lages IKKE automatisk når du fører timer! Etter at du har opprettet timene (POST /timesheet/entry), MÅ du lage ordren manuelt (POST /order). Deretter lager du ordrelinjer (POST /order/orderline) for timene og utgiftene. Til slutt fakturerer du med POST /invoice.
+- HUSK: BILAG & VALUTA: Bruk ALDRI feltet "amountGrossCurrency" når du bokfører vanlige bilag i NOK. Bruk KUN "amountGross". Da slipper du feil om at beløpene må matche.
+- HUSK: LÅST MVA-KODE: Hvis Tripletex sier "Kontoen er låst til mva-kode 0", MÅ du endre "vatType": {"id": 5} (som betyr 0%) på den aktuelle posteringen, eller fjerne vatType helt fra den linjen!
+- HUSK: LEVERANDØRFAKTURA / INNGÅENDE BILAG FRA PDF: Når oppgaven/PDF oppgir et fakturanummer (f.eks "INV-2026-4811"), MÅ du legge det inn som "invoiceNumber": "INV-2026-4811" i selve posting-objektet som går mot leverandørgjelden (konto 2400)! Ellers stryker du på fakturasjekken.
+- HUSK: FORTEGN PÅ BILAG: På en leverandørfaktura skal kostnadskontoen (f.eks 6700, 7300) ha POSITIV "amountGross" og "vatType" (f.eks {"id": 1}). Leverandørkontoen (konto 2400) skal ha NEGATIV "amountGross", "supplier": {"id": <ID>} og "invoiceNumber", men INGEN vatType.
+- HUSK: NIF / UTENLANDSKE ID-NUMMER: Hvis oppgaven oppgir et NIF, SSN, SIREN eller D-nummer, MÅ DU DROPPE DET i JSON-bodyen! Tripletex krasjer på norsk validering. Bare dropp ID-feltet helt ved opprettelse av ansatte!
+- HUSK: YRKESKODE (Occupation Code): Du MÅ søke etter den spesifikke stillingstittelen fra PDF-en (GET /employee/employment/occupationCode?name=Tittel). ALDRI gjør et tomt søk og velg ID 1. Du MÅ bruke riktig yrkeskode-ID!
+- HUSK: ARBEIDSKONTRAKT / EMPLOYMENT DETAILS: For å få 100% MÅ du inkludere "annualSalary", "percentageOfFullTimeEquivalent", "workingHoursScheme": "NOT_SHIFT", og riktig "occupationCode": {"id": <KORREKT_ID>}.
+- HUSK: AVDELING (Department): Du MÅ søke opp avdelingen fra PDF-en (GET /department?name=Navn). Får du 0 treff, MÅ du opprette den. Koble den til ansatt i POST /employee med "department": {"id": <AVD_ID>}.
+- HUSK: TOM SANDKASSE OG 0 TREFF: Hvis et GET-søk gir "0 TREFF!", betyr det at tingen garantert IKKE finnes! Gå UMIDDELBART til POST for å opprette objektet! Ikke kast bort tid på å lete mer.- HUSK: Bruk feltnavnet `bankAccountNumber` (ikke `bankAccount`) og sørg for at verdien er et gyldig 11-sifret norsk kontonummer.
+- HUSK: Inkluder alltid både amountGross og amountGrossCurrency med identisk verdi i alle postings-objekter.
+- HUSK: Verifiser faktura-ID før bruk og unngå å inkludere 'invoice'-objektet i 'ledger/voucher'-posteringer da dette feltet ikke støttes i Tripletex' API-struktur.
+- HUSK: Spesifiser alltid påkrevde type-ID-er som heltall og inkluder samsvarende amountGrossCurrency for alle beløpslinjer i bilag.
+- HUSK: Verifiser nøyaktige feltnavn mot API-dokumentasjonen for hvert objekt og bruk gyldige bankkontonummer som består MOD11-kontroll.
+- HUSK: Bruk kolleksjonsendepunkter med filterparametere i stedet for direkte ID-stier når du skal søke etter spesifikke ressurser.
+- HUSK: Bruk feltet `customerInvoiceId` i stedet for et `invoice`-objekt i posteringer, og inkluder alltid `amountGrossCurrency` med samme verdi som `amountGross`.
+- HUSK: Svar alltid med JSON og aksesser spesifikke ressurser direkte via /{endpoint}/{id} uten bruk av søkeparametere.
